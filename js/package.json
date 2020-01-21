@@ -1,0 +1,16 @@
+{
+  "name": "wasmd",
+  "version": "0.0.1",
+  "description": "demo js calling rest server",
+  "main": "index.js",
+  "repository": "git@github.com:cosmwasm/wasmd.git",
+  "author": "Ethan Frey <ethanfrey@users.noreply.github.com>",
+  "license": "MIT",
+  "scripts": {
+    "cli": "node",
+    "demo": "node index.js"
+  },
+  "dependencies": {
+    "axios": "~0.19.1"
+  }
+}
