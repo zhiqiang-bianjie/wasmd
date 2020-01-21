@@ -44,7 +44,12 @@ async function getAccount(addr) {
     return res.result.value;
 }
 
-async function broadcast(tx) {
+async function getValidators() {
+    const res = await get(`staking/validators`);
+    return res.result;
+}
+
+async function broadcastTx(tx) {
     const res = await post(`txs`, {tx, mode: 'block'});
     return res;
 }
@@ -93,8 +98,12 @@ async function demo() {
     const acct = await getAccount("cosmos1xgl000qa994750r5u4528n9pjzd3rcl7h6xkfc");
     console.log('Account:', acct);
 
-    const out = await broadcast(invalidTx);
-    console.log(out);
+    const out = await broadcastTx(invalidTx);
+    console.log('Tx:', out);
+
+    const validators = await getValidators();
+    console.log('Validators:', validators);
+    
 }
 
 
