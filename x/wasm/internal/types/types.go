@@ -20,7 +20,7 @@ func (c CodeInfo) ValidateBasic() error {
 	if len(c.CodeHash) == 0 {
 		return sdkerrors.Wrap(ErrEmpty, "code hash")
 	}
-	if err := sdk.VerifyAddressFormat(c.Creator); err != nil {
+	if _, err := sdk.AccAddressFromBech32(c.Creator); err != nil {
 		return sdkerrors.Wrap(err, "creator")
 	}
 	if err := validateSourceURL(c.Source); err != nil {
@@ -39,7 +39,7 @@ func (c CodeInfo) ValidateBasic() error {
 func NewCodeInfo(codeHash []byte, creator sdk.AccAddress, source string, builder string, instantiatePermission AccessConfig) CodeInfo {
 	return CodeInfo{
 		CodeHash:          codeHash,
-		Creator:           creator,
+		Creator:           creator.String(),
 		Source:            source,
 		Builder:           builder,
 		InstantiateConfig: instantiatePermission,
@@ -56,8 +56,8 @@ func (c *ContractHistory) AppendCodeHistory(newEntries ...ContractCodeHistoryEnt
 func NewContractInfo(codeID uint64, creator, admin sdk.AccAddress, label string, createdAt *AbsoluteTxPosition) ContractInfo {
 	return ContractInfo{
 		CodeID:  codeID,
-		Creator: creator,
-		Admin:   admin,
+		Creator: creator.String(),
+		Admin:   admin.String(),
 		Label:   label,
 		Created: createdAt,
 	}
@@ -67,11 +67,11 @@ func (c *ContractInfo) ValidateBasic() error {
 	if c.CodeID == 0 {
 		return sdkerrors.Wrap(ErrEmpty, "code id")
 	}
-	if err := sdk.VerifyAddressFormat(c.Creator); err != nil {
+	if _, err := sdk.AccAddressFromBech32(c.Creator); err != nil {
 		return sdkerrors.Wrap(err, "creator")
 	}
-	if c.Admin != nil {
-		if err := sdk.VerifyAddressFormat(c.Admin); err != nil {
+	if len(c.Admin) != 0 {
+		if _, err := sdk.AccAddressFromBech32(c.Admin); err != nil {
 			return sdkerrors.Wrap(err, "admin")
 		}
 	}

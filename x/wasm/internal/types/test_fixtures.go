@@ -64,7 +64,7 @@ func CodeFixture(mutators ...func(*Code)) Code {
 func CodeInfoFixture(mutators ...func(*CodeInfo)) CodeInfo {
 	wasmCode := bytes.Repeat([]byte{0x1}, 10)
 	codeHash := sha256.Sum256(wasmCode)
-	anyAddress := make([]byte, 20)
+	anyAddress := sdk.AccAddress(make([]byte, sdk.AddrLen)).String()
 	fixture := CodeInfo{
 		CodeHash:          codeHash[:],
 		Creator:           anyAddress,
@@ -79,9 +79,8 @@ func CodeInfoFixture(mutators ...func(*CodeInfo)) CodeInfo {
 }
 
 func ContractFixture(mutators ...func(*Contract)) Contract {
-	anyAddress := make([]byte, 20)
 	fixture := Contract{
-		ContractAddress: anyAddress,
+		ContractAddress: sdk.AccAddress(make([]byte, sdk.AddrLen)).String(),
 		ContractInfo:    ContractInfoFixture(OnlyGenesisFields),
 		ContractState:   []Model{{Key: []byte("anyKey"), Value: []byte("anyValue")}},
 	}
@@ -97,10 +96,9 @@ func OnlyGenesisFields(info *ContractInfo) {
 }
 
 func ContractInfoFixture(mutators ...func(*ContractInfo)) ContractInfo {
-	anyAddress := make([]byte, 20)
 	fixture := ContractInfo{
 		CodeID:  1,
-		Creator: anyAddress,
+		Creator: sdk.AccAddress(make([]byte, sdk.AddrLen)).String(),
 		Label:   "any",
 		Created: &AbsoluteTxPosition{BlockHeight: 1, TxIndex: 1},
 	}
@@ -119,11 +117,10 @@ func WithSHA256CodeHash(wasmCode []byte) func(info *CodeInfo) {
 }
 
 func StoreCodeProposalFixture(mutators ...func(*StoreCodeProposal)) *StoreCodeProposal {
-	var anyValidAddress sdk.AccAddress = bytes.Repeat([]byte{0x1}, sdk.AddrLen)
 	p := &StoreCodeProposal{
 		Title:        "Foo",
 		Description:  "Bar",
-		RunAs:        anyValidAddress,
+		RunAs:        sdk.AccAddress(make([]byte, sdk.AddrLen)).String(),
 		WASMByteCode: []byte{0x0},
 		Source:       "https://example.com/code",
 		Builder:      "foo/bar:latest",
@@ -154,8 +151,8 @@ func InstantiateContractProposalFixture(mutators ...func(p *InstantiateContractP
 	p := &InstantiateContractProposal{
 		Title:       "Foo",
 		Description: "Bar",
-		RunAs:       anyValidAddress,
-		Admin:       anyValidAddress,
+		RunAs:       sdk.AccAddress(make([]byte, sdk.AddrLen)).String(),
+		Admin:       sdk.AccAddress(make([]byte, sdk.AddrLen)).String(),
 		CodeID:      1,
 		Label:       "testing",
 		InitMsg:     initMsgBz,
@@ -181,10 +178,7 @@ func MigrateContractProposalFixture(mutators ...func(p *MigrateContractProposal)
 	if err != nil {
 		panic(err)
 	}
-	contractAddr, err := sdk.AccAddressFromBech32("cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5")
-	if err != nil {
-		panic(err)
-	}
+	contractAddr := "cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5"
 
 	p := &MigrateContractProposal{
 		Title:       "Foo",
@@ -192,7 +186,7 @@ func MigrateContractProposalFixture(mutators ...func(p *MigrateContractProposal)
 		Contract:    contractAddr,
 		CodeID:      1,
 		MigrateMsg:  migMsgBz,
-		RunAs:       anyValidAddress,
+		RunAs:       sdk.AccAddress(make([]byte, sdk.AddrLen)).String(),
 	}
 
 	for _, m := range mutators {
@@ -202,17 +196,12 @@ func MigrateContractProposalFixture(mutators ...func(p *MigrateContractProposal)
 }
 
 func UpdateAdminProposalFixture(mutators ...func(p *UpdateAdminProposal)) *UpdateAdminProposal {
-	var anyValidAddress sdk.AccAddress = bytes.Repeat([]byte{0x1}, sdk.AddrLen)
-
-	contractAddr, err := sdk.AccAddressFromBech32("cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5")
-	if err != nil {
-		panic(err)
-	}
+	contractAddr := "cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5"
 
 	p := &UpdateAdminProposal{
 		Title:       "Foo",
 		Description: "Bar",
-		NewAdmin:    anyValidAddress,
+		NewAdmin:    sdk.AccAddress(make([]byte, sdk.AddrLen)).String(),
 		Contract:    contractAddr,
 	}
 	for _, m := range mutators {
@@ -222,11 +211,7 @@ func UpdateAdminProposalFixture(mutators ...func(p *UpdateAdminProposal)) *Updat
 }
 
 func ClearAdminProposalFixture(mutators ...func(p *ClearAdminProposal)) *ClearAdminProposal {
-	contractAddr, err := sdk.AccAddressFromBech32("cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5")
-	if err != nil {
-		panic(err)
-	}
-
+	contractAddr := "cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5"
 	p := &ClearAdminProposal{
 		Title:       "Foo",
 		Description: "Bar",
