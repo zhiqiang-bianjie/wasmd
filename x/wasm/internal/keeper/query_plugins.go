@@ -59,12 +59,11 @@ type QueryPlugins struct {
 	Wasm    func(ctx sdk.Context, request *wasmTypes.WasmQuery) ([]byte, error)
 }
 
-func DefaultQueryPlugins(bank bankkeeper.ViewKeeper, staking stakingkeeper.Keeper, distKeeper distributionkeeper.Keeper, wasm *Keeper) QueryPlugins {
+func DefaultQueryPlugins(bank bankkeeper.ViewKeeper, wasm *Keeper) QueryPlugins {
 	return QueryPlugins{
-		Bank:    BankQuerier(bank),
-		Custom:  NoCustomQuerier,
-		Staking: StakingQuerier(staking, distKeeper),
-		Wasm:    WasmQuerier(wasm),
+		Bank:   BankQuerier(bank),
+		Custom: NoCustomQuerier,
+		Wasm:   WasmQuerier(wasm),
 	}
 }
 

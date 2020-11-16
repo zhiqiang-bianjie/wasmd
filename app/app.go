@@ -370,8 +370,6 @@ func NewWasmApp(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest b
 		app.getSubspace(wasm.ModuleName),
 		app.accountKeeper,
 		app.bankKeeper,
-		app.stakingKeeper,
-		app.distrKeeper,
 		wasmRouter,
 		wasmDir,
 		wasmConfig,

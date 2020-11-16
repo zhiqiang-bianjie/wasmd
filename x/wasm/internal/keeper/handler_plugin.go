@@ -40,10 +40,9 @@ type MessageEncoders struct {
 
 func DefaultEncoders() MessageEncoders {
 	return MessageEncoders{
-		Bank:    EncodeBankMsg,
-		Custom:  NoCustomMsg,
-		Staking: EncodeStakingMsg,
-		Wasm:    EncodeWasmMsg,
+		Bank:   EncodeBankMsg,
+		Custom: NoCustomMsg,
+		Wasm:   EncodeWasmMsg,
 	}
 }
 
@@ -73,7 +72,7 @@ func (e MessageEncoders) Encode(contractAddr sdk.AccAddress, msg wasmTypes.Cosmo
 	case msg.Custom != nil:
 		return e.Custom(contractAddr, msg.Custom)
 	case msg.Staking != nil:
-		return e.Staking(contractAddr, msg.Staking)
+		return nil, fmt.Errorf("unsupport module")
 	case msg.Wasm != nil:
 		return e.Wasm(contractAddr, msg.Wasm)
 	}

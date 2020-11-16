@@ -235,8 +235,6 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 		paramsKeeper.Subspace(wasmtypes.DefaultParamspace),
 		authKeeper,
 		bankKeeper,
-		stakingKeeper,
-		distKeeper,
 		router,
 		tempDir,
 		wasmConfig,
