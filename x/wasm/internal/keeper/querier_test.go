@@ -33,11 +33,11 @@ func TestQueryAllContractState(t *testing.T) {
 		expErr           *sdkErrors.Error
 	}{
 		"query all": {
-			srcQuery:         &types.QueryAllContractStateRequest{Address: contractAddr},
+			srcQuery:         &types.QueryAllContractStateRequest{Address: contractAddr.String()},
 			expModelContains: contractModel,
 		},
 		"query all with unknown address": {
-			srcQuery: &types.QueryAllContractStateRequest{Address: AnyAccAddress(t)},
+			srcQuery: &types.QueryAllContractStateRequest{Address: RandomBech32AccountAddress(t)},
 			expErr:   types.ErrNotFound,
 		},
 	}
@@ -60,7 +60,7 @@ func TestQuerySmartContractState(t *testing.T) {
 	keeper := keepers.WasmKeeper
 
 	exampleContract := InstantiateHackatomExampleContract(t, ctx, keepers)
-	contractAddr := exampleContract.Contract
+	contractAddr := exampleContract.Contract.String()
 
 	q := NewQuerier(keeper)
 	specs := map[string]struct {
@@ -82,7 +82,7 @@ func TestQuerySmartContractState(t *testing.T) {
 			expErr:   types.ErrQueryFailed,
 		},
 		"query smart with unknown address": {
-			srcQuery: &types.QuerySmartContractStateRequest{Address: AnyAccAddress(t), QueryData: []byte(`{"verifier":{}}`)},
+			srcQuery: &types.QuerySmartContractStateRequest{Address: RandomBech32AccountAddress(t), QueryData: []byte(`{"verifier":{}}`)},
 			expErr:   types.ErrNotFound,
 		},
 	}
@@ -103,12 +103,12 @@ func TestQueryRawContractState(t *testing.T) {
 	keeper := keepers.WasmKeeper
 
 	exampleContract := InstantiateHackatomExampleContract(t, ctx, keepers)
-	contractAddr := exampleContract.Contract
+	contractAddr := exampleContract.Contract.String()
 	contractModel := []types.Model{
 		{Key: []byte("foo"), Value: []byte(`"bar"`)},
 		{Key: []byte{0x0, 0x1}, Value: []byte(`{"count":8}`)},
 	}
-	require.NoError(t, keeper.importContractState(ctx, contractAddr, contractModel))
+	require.NoError(t, keeper.importContractState(ctx, exampleContract.Contract, contractModel))
 
 	q := NewQuerier(keeper)
 	specs := map[string]struct {
@@ -137,7 +137,7 @@ func TestQueryRawContractState(t *testing.T) {
 			expData:  nil,
 		},
 		"query raw with unknown address": {
-			srcQuery: &types.QueryRawContractStateRequest{Address: AnyAccAddress(t), QueryData: []byte("foo")},
+			srcQuery: &types.QueryRawContractStateRequest{Address: RandomBech32AccountAddress(t), QueryData: []byte("foo")},
 			expErr:   types.ErrNotFound,
 		},
 	}
@@ -227,44 +227,44 @@ func TestQueryContractHistory(t *testing.T) {
 	}{
 		"response with internal fields cleared": {
 			srcHistory: []types.ContractCodeHistoryEntry{{
-				Operation: types.ContractCodeHistoryTypeGenesis,
+				Operation: types.ContractCodeHistoryOperationTypeGenesis,
 				CodeID:    firstCodeID,
 				Updated:   types.NewAbsoluteTxPosition(ctx),
 				Msg:       []byte(`"init message"`),
 			}},
 			expContent: []types.ContractCodeHistoryEntry{{
-				Operation: types.ContractCodeHistoryTypeGenesis,
+				Operation: types.ContractCodeHistoryOperationTypeGenesis,
 				CodeID:    firstCodeID,
 				Msg:       []byte(`"init message"`),
 			}},
 		},
 		"response with multiple entries": {
 			srcHistory: []types.ContractCodeHistoryEntry{{
-				Operation: types.ContractCodeHistoryTypeInit,
+				Operation: types.ContractCodeHistoryOperationTypeInit,
 				CodeID:    firstCodeID,
 				Updated:   types.NewAbsoluteTxPosition(ctx),
 				Msg:       []byte(`"init message"`),
 			}, {
-				Operation: types.ContractCodeHistoryTypeMigrate,
+				Operation: types.ContractCodeHistoryOperationTypeMigrate,
 				CodeID:    2,
 				Updated:   types.NewAbsoluteTxPosition(ctx),
 				Msg:       []byte(`"migrate message 1"`),
 			}, {
-				Operation: types.ContractCodeHistoryTypeMigrate,
+				Operation: types.ContractCodeHistoryOperationTypeMigrate,
 				CodeID:    3,
 				Updated:   types.NewAbsoluteTxPosition(ctx),
 				Msg:       []byte(`"migrate message 2"`),
 			}},
 			expContent: []types.ContractCodeHistoryEntry{{
-				Operation: types.ContractCodeHistoryTypeInit,
+				Operation: types.ContractCodeHistoryOperationTypeInit,
 				CodeID:    firstCodeID,
 				Msg:       []byte(`"init message"`),
 			}, {
-				Operation: types.ContractCodeHistoryTypeMigrate,
+				Operation: types.ContractCodeHistoryOperationTypeMigrate,
 				CodeID:    2,
 				Msg:       []byte(`"migrate message 1"`),
 			}, {
-				Operation: types.ContractCodeHistoryTypeMigrate,
+				Operation: types.ContractCodeHistoryOperationTypeMigrate,
 				CodeID:    3,
 				Msg:       []byte(`"migrate message 2"`),
 			}},
@@ -272,7 +272,7 @@ func TestQueryContractHistory(t *testing.T) {
 		"unknown contract address": {
 			srcQueryAddr: otherAddr,
 			srcHistory: []types.ContractCodeHistoryEntry{{
-				Operation: types.ContractCodeHistoryTypeGenesis,
+				Operation: types.ContractCodeHistoryOperationTypeGenesis,
 				CodeID:    firstCodeID,
 				Updated:   types.NewAbsoluteTxPosition(ctx),
 				Msg:       []byte(`"init message"`),
@@ -289,7 +289,7 @@ func TestQueryContractHistory(t *testing.T) {
 			if queryContractAddr == nil {
 				queryContractAddr = myContractAddr
 			}
-			req := &types.QueryContractHistoryRequest{Address: queryContractAddr}
+			req := &types.QueryContractHistoryRequest{Address: queryContractAddr.String()}
 
 			// when
 			q := NewQuerier(keeper)

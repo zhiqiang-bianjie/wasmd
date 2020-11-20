@@ -15,10 +15,13 @@ import (
 const (
 	// DefaultParamspace for params keeper
 	DefaultParamspace = ModuleName
+	// DefaultMaxWasmCodeSize limit max bytes read to prevent gzip bombs
+	DefaultMaxWasmCodeSize = 600 * 1024
 )
 
 var ParamStoreKeyUploadAccess = []byte("uploadAccess")
 var ParamStoreKeyInstantiateAccess = []byte("instantiateAccess")
+var ParamStoreKeyMaxWasmCodeSize = []byte("maxWasmCodeSize")
 
 var AllAccessTypes = []AccessType{
 	AccessTypeNobody,
@@ -34,7 +37,7 @@ func (a AccessType) With(addr sdk.AccAddress) AccessConfig {
 		if err := sdk.VerifyAddressFormat(addr); err != nil {
 			panic(err)
 		}
-		return AccessConfig{Permission: AccessTypeOnlyAddress, Address: addr}
+		return AccessConfig{Permission: AccessTypeOnlyAddress, Address: addr.String()}
 	case AccessTypeEverybody:
 		return AllowEverybody
 	}
@@ -50,7 +53,7 @@ func (a AccessType) String() string {
 	case AccessTypeEverybody:
 		return "Everybody"
 	}
-	return "Undefined"
+	return "Unspecified"
 }
 
 func (a *AccessType) UnmarshalText(text []byte) error {
@@ -60,7 +63,7 @@ func (a *AccessType) UnmarshalText(text []byte) error {
 			return nil
 		}
 	}
-	*a = AccessTypeUndefined
+	*a = AccessTypeUnspecified
 	return nil
 }
 func (a AccessType) MarshalText() ([]byte, error) {
@@ -76,7 +79,7 @@ func (a *AccessType) UnmarshalJSONPB(_ *jsonpb.Unmarshaler, data []byte) error {
 }
 
 func (a AccessConfig) Equals(o AccessConfig) bool {
-	return a.Permission == o.Permission && a.Address.Equals(o.Address)
+	return a.Permission == o.Permission && a.Address == o.Address
 }
 
 var (
@@ -95,6 +98,7 @@ func DefaultParams() Params {
 	return Params{
 		CodeUploadAccess:             AllowEverybody,
 		InstantiateDefaultPermission: AccessTypeEverybody,
+		MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 	}
 }
 
@@ -108,6 +112,7 @@ func (p *Params) ParamSetPairs() paramtypes.ParamSetPairs {
 	return paramtypes.ParamSetPairs{
 		paramtypes.NewParamSetPair(ParamStoreKeyUploadAccess, &p.CodeUploadAccess, validateAccessConfig),
 		paramtypes.NewParamSetPair(ParamStoreKeyInstantiateAccess, &p.InstantiateDefaultPermission, validateAccessType),
+		paramtypes.NewParamSetPair(ParamStoreKeyMaxWasmCodeSize, &p.MaxWasmCodeSize, validateMaxWasmCodeSize),
 	}
 }
 
@@ -118,6 +123,9 @@ func (p Params) ValidateBasic() error {
 	}
 	if err := validateAccessConfig(p.CodeUploadAccess); err != nil {
 		return errors.Wrap(err, "upload access")
+	}
+	if err := validateMaxWasmCodeSize(p.MaxWasmCodeSize); err != nil {
+		return errors.Wrap(err, "max wasm code size")
 	}
 	return nil
 }
@@ -135,7 +143,7 @@ func validateAccessType(i interface{}) error {
 	if !ok {
 		return fmt.Errorf("invalid parameter type: %T", i)
 	}
-	if a == AccessTypeUndefined {
+	if a == AccessTypeUnspecified {
 		return sdkerrors.Wrap(ErrEmpty, "type")
 	}
 	for _, v := range AllAccessTypes {
@@ -146,9 +154,20 @@ func validateAccessType(i interface{}) error {
 	return sdkerrors.Wrapf(ErrInvalid, "unknown type: %q", a)
 }
 
+func validateMaxWasmCodeSize(i interface{}) error {
+	a, ok := i.(uint64)
+	if !ok {
+		return sdkerrors.Wrapf(ErrInvalid, "type: %T", i)
+	}
+	if a == 0 {
+		return sdkerrors.Wrap(ErrInvalid, "must be greater 0")
+	}
+	return nil
+}
+
 func (v AccessConfig) ValidateBasic() error {
 	switch v.Permission {
-	case AccessTypeUndefined:
+	case AccessTypeUnspecified:
 		return sdkerrors.Wrap(ErrEmpty, "type")
 	case AccessTypeNobody, AccessTypeEverybody:
 		if len(v.Address) != 0 {
@@ -156,7 +175,8 @@ func (v AccessConfig) ValidateBasic() error {
 		}
 		return nil
 	case AccessTypeOnlyAddress:
-		return sdk.VerifyAddressFormat(v.Address)
+		_, err := sdk.AccAddressFromBech32(v.Address)
+		return err
 	}
 	return sdkerrors.Wrapf(ErrInvalid, "unknown type: %q", v.Permission)
 }
@@ -168,7 +188,7 @@ func (v AccessConfig) Allowed(actor sdk.AccAddress) bool {
 	case AccessTypeEverybody:
 		return true
 	case AccessTypeOnlyAddress:
-		return v.Address.Equals(actor)
+		return v.Address == actor.String()
 	default:
 		panic("unknown type")
 	}

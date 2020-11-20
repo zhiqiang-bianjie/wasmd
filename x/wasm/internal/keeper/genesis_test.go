@@ -48,7 +48,9 @@ func TestGenesisExportImport(t *testing.T) {
 		f.Fuzz(&contract)
 		f.Fuzz(&stateModels)
 		f.NilChance(0).Fuzz(&history)
-		codeID, err := srcKeeper.Create(srcCtx, codeInfo.Creator, wasmCode, codeInfo.Source, codeInfo.Builder, &codeInfo.InstantiateConfig)
+		creatorAddr, err := sdk.AccAddressFromBech32(codeInfo.Creator)
+		require.NoError(t, err)
+		codeID, err := srcKeeper.Create(srcCtx, creatorAddr, wasmCode, codeInfo.Source, codeInfo.Builder, &codeInfo.InstantiateConfig)
 		require.NoError(t, err)
 		contract.CodeID = codeID
 		contractAddr := srcKeeper.generateContractAddress(srcCtx, codeID)
@@ -57,7 +59,7 @@ func TestGenesisExportImport(t *testing.T) {
 		srcKeeper.importContractState(srcCtx, contractAddr, stateModels)
 	}
 	var wasmParams types.Params
-	f.Fuzz(&wasmParams)
+	f.NilChance(0).Fuzz(&wasmParams)
 	srcKeeper.setParams(srcCtx, wasmParams)
 
 	// export
@@ -208,7 +210,7 @@ func TestFailFastImport(t *testing.T) {
 				}},
 				Contracts: []types.Contract{
 					{
-						ContractAddress: contractAddress(1, 1),
+						ContractAddress: contractAddress(1, 1).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 					},
 				},
@@ -229,10 +231,10 @@ func TestFailFastImport(t *testing.T) {
 				}},
 				Contracts: []types.Contract{
 					{
-						ContractAddress: contractAddress(1, 1),
+						ContractAddress: contractAddress(1, 1).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 					}, {
-						ContractAddress: contractAddress(1, 2),
+						ContractAddress: contractAddress(1, 2).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 					},
 				},
@@ -248,7 +250,7 @@ func TestFailFastImport(t *testing.T) {
 			src: types.GenesisState{
 				Contracts: []types.Contract{
 					{
-						ContractAddress: contractAddress(1, 1),
+						ContractAddress: contractAddress(1, 1).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 					},
 				},
@@ -264,10 +266,10 @@ func TestFailFastImport(t *testing.T) {
 				}},
 				Contracts: []types.Contract{
 					{
-						ContractAddress: contractAddress(1, 1),
+						ContractAddress: contractAddress(1, 1).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 					}, {
-						ContractAddress: contractAddress(1, 1),
+						ContractAddress: contractAddress(1, 1).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 					},
 				},
@@ -283,7 +285,7 @@ func TestFailFastImport(t *testing.T) {
 				}},
 				Contracts: []types.Contract{
 					{
-						ContractAddress: contractAddress(1, 1),
+						ContractAddress: contractAddress(1, 1).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 						ContractState: []types.Model{
 							{
@@ -331,7 +333,7 @@ func TestFailFastImport(t *testing.T) {
 				}},
 				Contracts: []types.Contract{
 					{
-						ContractAddress: contractAddress(1, 1),
+						ContractAddress: contractAddress(1, 1).String(),
 						ContractInfo:    types.ContractInfoFixture(func(c *wasmTypes.ContractInfo) { c.CodeID = 1 }, types.OnlyGenesisFields),
 					},
 				},
@@ -367,7 +369,8 @@ func TestImportContractWithCodeHistoryReset(t *testing.T) {
 		"code_upload_access": {
 			"permission": "Everybody"
 		},
-		"instantiate_default_permission": "Everybody"
+		"instantiate_default_permission": "Everybody",
+		"max_wasm_code_size": 500000
 	},
   "codes": [
     {
@@ -432,7 +435,7 @@ func TestImportContractWithCodeHistoryReset(t *testing.T) {
 	// verify code info
 	gotCodeInfo := keeper.GetCodeInfo(ctx, 1)
 	require.NotNil(t, gotCodeInfo)
-	codeCreatorAddr, _ := sdk.AccAddressFromBech32("cosmos1qtu5n0cnhfkjj6l2rq97hmky9fd89gwca9yarx")
+	codeCreatorAddr := "cosmos1qtu5n0cnhfkjj6l2rq97hmky9fd89gwca9yarx"
 	expCodeInfo := types.CodeInfo{
 		CodeHash: wasmCodeHash[:],
 		Creator:  codeCreatorAddr,
@@ -449,8 +452,8 @@ func TestImportContractWithCodeHistoryReset(t *testing.T) {
 	contractAddr, _ := sdk.AccAddressFromBech32("cosmos18vd8fpwxzck93qlwghaj6arh4p7c5n89uzcee5")
 	gotContractInfo := keeper.GetContractInfo(ctx, contractAddr)
 	require.NotNil(t, gotContractInfo)
-	contractCreatorAddr, _ := sdk.AccAddressFromBech32("cosmos13x849jzd03vne42ynpj25hn8npjecxqrjghd8x")
-	adminAddr, _ := sdk.AccAddressFromBech32("cosmos1h5t8zxmjr30e9dqghtlpl40f2zz5cgey6esxtn")
+	contractCreatorAddr := "cosmos13x849jzd03vne42ynpj25hn8npjecxqrjghd8x"
+	adminAddr := "cosmos1h5t8zxmjr30e9dqghtlpl40f2zz5cgey6esxtn"
 
 	expContractInfo := types.ContractInfo{
 		CodeID:  firstCodeID,
@@ -462,7 +465,7 @@ func TestImportContractWithCodeHistoryReset(t *testing.T) {
 	assert.Equal(t, expContractInfo, *gotContractInfo)
 
 	expHistory := []types.ContractCodeHistoryEntry{{
-		Operation: types.ContractCodeHistoryTypeGenesis,
+		Operation: types.ContractCodeHistoryOperationTypeGenesis,
 		CodeID:    firstCodeID,
 		Updated:   types.NewAbsoluteTxPosition(ctx),
 	},
@@ -470,7 +473,7 @@ func TestImportContractWithCodeHistoryReset(t *testing.T) {
 	assert.Equal(t, expHistory, keeper.GetContractHistory(ctx, contractAddr).CodeHistoryEntries)
 }
 
-func setupKeeper(t *testing.T) (Keeper, sdk.Context, []sdk.StoreKey, func()) {
+func setupKeeper(t *testing.T) (*Keeper, sdk.Context, []sdk.StoreKey, func()) {
 	t.Helper()
 	tempDir, err := ioutil.TempDir("", "wasm")
 	require.NoError(t, err)
@@ -501,5 +504,5 @@ func setupKeeper(t *testing.T) (Keeper, sdk.Context, []sdk.StoreKey, func()) {
 	srcKeeper := NewKeeper(encodingConfig.Marshaler, keyWasm, pk.Subspace(wasmTypes.DefaultParamspace), authkeeper.AccountKeeper{}, nil, nil, tempDir, wasmConfig, "", nil, nil)
 	srcKeeper.setParams(ctx, wasmTypes.DefaultParams())
 
-	return srcKeeper, ctx, []sdk.StoreKey{keyWasm, keyParams}, cleanup
+	return &srcKeeper, ctx, []sdk.StoreKey{keyWasm, keyParams}, cleanup
 }

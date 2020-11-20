@@ -6,6 +6,11 @@ COMMIT := $(shell git log -1 --format='%H')
 LEDGER_ENABLED ?= true
 SDK_PACK := $(shell go list -m github.com/cosmos/cosmos-sdk | sed  's/ /\@/g')
 
+# for dockerized protobuf tools
+PROTO_CONTAINER := cosmwasm/prototool-docker:latest
+DOCKER_BUF := docker run --rm -v $(shell pwd)/buf.yaml:/workspace/buf.yaml -v $(shell go list -f "{{ .Dir }}" -m github.com/cosmos/cosmos-sdk):/workspace/cosmos_sdk_dir -v $(shell pwd):/workspace/wasmd  --workdir /workspace $(PROTO_CONTAINER)
+HTTPS_GIT := https://github.com/CosmWasm/wasmd.git
+
 export GO111MODULE = on
 
 # process build tags
@@ -49,9 +54,9 @@ build_tags_comma_sep := $(subst $(empty),$(comma),$(build_tags))
 
 ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=wasm \
 		  -X github.com/cosmos/cosmos-sdk/version.AppName=wasmd \
-		  -X github.com/CosmWasm/wasmd/cmd/wasmcli/version.ClientName=wasmcli \
 		  -X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
 		  -X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
+		  -X github.com/CosmWasm/wasmd/app.Bech32Prefix=wasm \
 		  -X "github.com/cosmos/cosmos-sdk/version.BuildTags=$(build_tags_comma_sep)"
 
 ifeq ($(WITH_CLEVELDB),yes)
@@ -62,10 +67,8 @@ ldflags := $(strip $(ldflags))
 
 coral_ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=coral \
 				  -X github.com/cosmos/cosmos-sdk/version.AppName=corald \
-				  -X github.com/CosmWasm/wasmd/cmd/wasmcli/version.ClientName=coral \
 				  -X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
 				  -X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
-				  -X github.com/CosmWasm/wasmd/app.CLIDir=.coral \
 				  -X github.com/CosmWasm/wasmd/app.NodeDir=.corald \
 				  -X github.com/CosmWasm/wasmd/app.Bech32Prefix=coral \
 				  -X "github.com/cosmos/cosmos-sdk/version.BuildTags=$(build_tags_comma_sep)"
@@ -77,11 +80,9 @@ coral_ldflags := $(strip $(coral_ldflags))
 
 flex_ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=gaiaflex \
 				  -X github.com/cosmos/cosmos-sdk/version.AppName=gaiaflexd \
-				  -X github.com/CosmWasm/wasmd/cmd/wasmcli/version.ClientName=gaiaflex \
 				  -X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
 				  -X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
 				  -X github.com/CosmWasm/wasmd/app.ProposalsEnabled=true \
-				  -X github.com/CosmWasm/wasmd/app.CLIDir=.gaiaflex \
 				  -X github.com/CosmWasm/wasmd/app.NodeDir=.gaiaflexd \
 				  -X github.com/CosmWasm/wasmd/app.Bech32Prefix=cosmos \
 				  -X "github.com/cosmos/cosmos-sdk/version.BuildTags=$(build_tags_comma_sep)"
@@ -97,29 +98,23 @@ all: install lint test
 
 build: go.sum
 ifeq ($(OS),Windows_NT)
-	# wasmd nodes not supported on windows, maybe the cli?
-	go build -mod=readonly $(BUILD_FLAGS) -o build/wasmcli.exe ./cmd/wasmcli
+	exit 1
 else
 	go build -mod=readonly $(BUILD_FLAGS) -o build/wasmd ./cmd/wasmd
-	go build -mod=readonly $(BUILD_FLAGS) -o build/wasmcli ./cmd/wasmcli
 endif
 
 build-coral: go.sum
 ifeq ($(OS),Windows_NT)
-	# wasmd nodes not supported on windows, maybe the cli?
-	go build -mod=readonly $(CORAL_BUILD_FLAGS) -o build/coral.exe ./cmd/wasmcli
+	exit 1
 else
 	go build -mod=readonly $(CORAL_BUILD_FLAGS) -o build/corald ./cmd/wasmd
-	go build -mod=readonly $(CORAL_BUILD_FLAGS) -o build/coral ./cmd/wasmcli
 endif
 
 build-gaiaflex: go.sum
 ifeq ($(OS),Windows_NT)
-	# wasmd nodes not supported on windows, maybe the cli?
-	go build -mod=readonly $(FLEX_BUILD_FLAGS) -o build/gaiaflex.exe ./cmd/wasmcli
+	exit 1
 else
 	go build -mod=readonly $(FLEX_BUILD_FLAGS) -o build/gaiaflexd ./cmd/wasmd
-	go build -mod=readonly $(FLEX_BUILD_FLAGS) -o build/gaiaflex ./cmd/wasmcli
 endif
 
 build-linux: go.sum
@@ -134,7 +129,6 @@ endif
 
 install: go.sum
 	go install -mod=readonly $(BUILD_FLAGS) ./cmd/wasmd
-	go install -mod=readonly $(BUILD_FLAGS) ./cmd/wasmcli
 
 ########################################
 ### Tools & dependencies
@@ -198,16 +192,19 @@ format:
 ###############################################################################
 
 proto-all: proto-gen proto-lint proto-check-breaking
+.PHONY: proto-all
 
-proto-gen:
-	@./scripts/protocgen.sh
+proto-gen: proto-lint
+	@docker run --rm -v $(shell go list -f "{{ .Dir }}" -m github.com/cosmos/cosmos-sdk):/workspace/cosmos_sdk_dir -v $(shell pwd):/workspace --workdir /workspace --env COSMOS_SDK_DIR=/workspace/cosmos_sdk_dir $(PROTO_CONTAINER) ./scripts/protocgen.sh
+.PHONY: proto-gen
 
 proto-lint:
-	@buf check lint --error-format=json
+	@$(DOCKER_BUF) buf check lint --error-format=json
+.PHONY: proto-lint
 
 proto-check-breaking:
-	@buf check breaking --against-input '.git#branch=master'
-
+	@$(DOCKER_BUF) buf check breaking --against-input $(HTTPS_GIT)#branch=master
+.PHONY: proto-check-breaking
 
 .PHONY: all build-linux install install-debug \
 	go-mod-cache draw-deps clean build format \

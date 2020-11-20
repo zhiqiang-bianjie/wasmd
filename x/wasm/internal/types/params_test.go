@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/cosmos/cosmos-sdk/codec"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -11,8 +13,8 @@ import (
 
 func TestValidateParams(t *testing.T) {
 	var (
-		anyAddress     = make([]byte, sdk.AddrLen)
-		invalidAddress = make([]byte, sdk.AddrLen-1)
+		anyAddress     sdk.AccAddress = make([]byte, sdk.AddrLen)
+		invalidAddress                = "invalid address"
 	)
 
 	specs := map[string]struct {
@@ -26,23 +28,27 @@ func TestValidateParams(t *testing.T) {
 			src: Params{
 				CodeUploadAccess:             AllowNobody,
 				InstantiateDefaultPermission: AccessTypeNobody,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 		},
 		"all good with everybody": {
 			src: Params{
 				CodeUploadAccess:             AllowEverybody,
 				InstantiateDefaultPermission: AccessTypeEverybody,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 		},
 		"all good with only address": {
 			src: Params{
 				CodeUploadAccess:             AccessTypeOnlyAddress.With(anyAddress),
 				InstantiateDefaultPermission: AccessTypeOnlyAddress,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 		},
 		"reject empty type in instantiate permission": {
 			src: Params{
 				CodeUploadAccess: AllowNobody,
+				MaxWasmCodeSize:  DefaultMaxWasmCodeSize,
 			},
 			expErr: true,
 		},
@@ -50,6 +56,7 @@ func TestValidateParams(t *testing.T) {
 			src: Params{
 				CodeUploadAccess:             AllowNobody,
 				InstantiateDefaultPermission: 1111,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 			expErr: true,
 		},
@@ -57,32 +64,45 @@ func TestValidateParams(t *testing.T) {
 			src: Params{
 				CodeUploadAccess:             AccessConfig{Permission: AccessTypeOnlyAddress, Address: invalidAddress},
 				InstantiateDefaultPermission: AccessTypeOnlyAddress,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 			expErr: true,
 		},
 		"reject CodeUploadAccess Everybody with obsolete address": {
 			src: Params{
-				CodeUploadAccess:             AccessConfig{Permission: AccessTypeEverybody, Address: anyAddress},
+				CodeUploadAccess:             AccessConfig{Permission: AccessTypeEverybody, Address: anyAddress.String()},
 				InstantiateDefaultPermission: AccessTypeOnlyAddress,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 			expErr: true,
 		},
 		"reject CodeUploadAccess Nobody with obsolete address": {
 			src: Params{
-				CodeUploadAccess:             AccessConfig{Permission: AccessTypeNobody, Address: anyAddress},
+				CodeUploadAccess:             AccessConfig{Permission: AccessTypeNobody, Address: anyAddress.String()},
 				InstantiateDefaultPermission: AccessTypeOnlyAddress,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 			expErr: true,
 		},
 		"reject empty CodeUploadAccess": {
 			src: Params{
 				InstantiateDefaultPermission: AccessTypeOnlyAddress,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
 			},
 			expErr: true,
-		}, "reject undefined permission in CodeUploadAccess": {
+		},
+		"reject undefined permission in CodeUploadAccess": {
 			src: Params{
-				CodeUploadAccess:             AccessConfig{Permission: AccessTypeUndefined},
+				CodeUploadAccess:             AccessConfig{Permission: AccessTypeUnspecified},
 				InstantiateDefaultPermission: AccessTypeOnlyAddress,
+				MaxWasmCodeSize:              DefaultMaxWasmCodeSize,
+			},
+			expErr: true,
+		},
+		"reject empty max wasm code size": {
+			src: Params{
+				CodeUploadAccess:             AllowNobody,
+				InstantiateDefaultPermission: AccessTypeNobody,
 			},
 			expErr: true,
 		},
@@ -104,11 +124,11 @@ func TestAccessTypeMarshalJson(t *testing.T) {
 		src AccessType
 		exp string
 	}{
-		"Undefined":   {src: AccessTypeUndefined, exp: `"Undefined"`},
+		"Unspecified": {src: AccessTypeUnspecified, exp: `"Unspecified"`},
 		"Nobody":      {src: AccessTypeNobody, exp: `"Nobody"`},
 		"OnlyAddress": {src: AccessTypeOnlyAddress, exp: `"OnlyAddress"`},
 		"Everybody":   {src: AccessTypeEverybody, exp: `"Everybody"`},
-		"unknown":     {src: 999, exp: `"Undefined"`},
+		"unknown":     {src: 999, exp: `"Unspecified"`},
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
@@ -124,11 +144,11 @@ func TestAccessTypeUnmarshalJson(t *testing.T) {
 		src string
 		exp AccessType
 	}{
-		"Undefined":   {src: `"Undefined"`, exp: AccessTypeUndefined},
+		"Unspecified": {src: `"Unspecified"`, exp: AccessTypeUnspecified},
 		"Nobody":      {src: `"Nobody"`, exp: AccessTypeNobody},
 		"OnlyAddress": {src: `"OnlyAddress"`, exp: AccessTypeOnlyAddress},
 		"Everybody":   {src: `"Everybody"`, exp: AccessTypeEverybody},
-		"unknown":     {src: `""`, exp: AccessTypeUndefined},
+		"unknown":     {src: `""`, exp: AccessTypeUnspecified},
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
@@ -147,14 +167,18 @@ func TestParamsUnmarshalJson(t *testing.T) {
 
 		"defaults": {
 			src: `{"code_upload_access": {"permission": "Everybody"},
-				"instantiate_default_permission": "Everybody"}`,
+				"instantiate_default_permission": "Everybody",
+				"max_wasm_code_size": 614400}`,
 			exp: DefaultParams(),
 		},
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
 			var val Params
-			err := ModuleCdc.UnmarshalJSON([]byte(spec.src), &val)
+			interfaceRegistry := codectypes.NewInterfaceRegistry()
+			marshaler := codec.NewProtoCodec(interfaceRegistry)
+
+			err := marshaler.UnmarshalJSON([]byte(spec.src), &val)
 			require.NoError(t, err)
 			assert.Equal(t, spec.exp, val)
 		})

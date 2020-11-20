@@ -11,7 +11,7 @@ import (
 // InitGenesis sets supply information for genesis.
 //
 // CONTRACT: all types of accounts must have been already initialized/created
-func InitGenesis(ctx sdk.Context, keeper Keeper, data types.GenesisState) error {
+func InitGenesis(ctx sdk.Context, keeper *Keeper, data types.GenesisState) error {
 	var maxCodeID uint64
 	for i, code := range data.Codes {
 		err := keeper.importCode(ctx, code.CodeID, code.CodeInfo, code.CodeBytes)
@@ -25,7 +25,11 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, data types.GenesisState) error 
 
 	var maxContractID int
 	for i, contract := range data.Contracts {
-		err := keeper.importContract(ctx, contract.ContractAddress, &contract.ContractInfo, contract.ContractState)
+		contractAddr, err := sdk.AccAddressFromBech32(contract.ContractAddress)
+		if err != nil {
+			return sdkerrors.Wrapf(err, "address in contract number %d", i)
+		}
+		err = keeper.importContract(ctx, contractAddr, &contract.ContractInfo, contract.ContractState)
 		if err != nil {
 			return sdkerrors.Wrapf(err, "contract number %d", i)
 		}
@@ -52,7 +56,7 @@ func InitGenesis(ctx sdk.Context, keeper Keeper, data types.GenesisState) error 
 }
 
 // ExportGenesis returns a GenesisState for a given context and keeper.
-func ExportGenesis(ctx sdk.Context, keeper Keeper) *types.GenesisState {
+func ExportGenesis(ctx sdk.Context, keeper *Keeper) *types.GenesisState {
 	var genState types.GenesisState
 
 	genState.Params = keeper.GetParams(ctx)
@@ -84,7 +88,7 @@ func ExportGenesis(ctx sdk.Context, keeper Keeper) *types.GenesisState {
 		contract.Created = nil
 
 		genState.Contracts = append(genState.Contracts, types.Contract{
-			ContractAddress: addr,
+			ContractAddress: addr.String(),
 			ContractInfo:    contract,
 			ContractState:   state,
 		})

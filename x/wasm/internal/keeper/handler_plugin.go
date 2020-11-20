@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
 	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
@@ -26,10 +26,10 @@ func NewMessageHandler(router sdk.Router, customEncoders *MessageEncoders) Messa
 	}
 }
 
-type BankEncoder func(sender sdk.AccAddress, msg *wasmTypes.BankMsg) ([]sdk.Msg, error)
+type BankEncoder func(sender sdk.AccAddress, msg *wasmvmtypes.BankMsg) ([]sdk.Msg, error)
 type CustomEncoder func(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error)
-type StakingEncoder func(sender sdk.AccAddress, msg *wasmTypes.StakingMsg) ([]sdk.Msg, error)
-type WasmEncoder func(sender sdk.AccAddress, msg *wasmTypes.WasmMsg) ([]sdk.Msg, error)
+type StakingEncoder func(sender sdk.AccAddress, msg *wasmvmtypes.StakingMsg) ([]sdk.Msg, error)
+type WasmEncoder func(sender sdk.AccAddress, msg *wasmvmtypes.WasmMsg) ([]sdk.Msg, error)
 
 type MessageEncoders struct {
 	Bank    BankEncoder
@@ -65,7 +65,7 @@ func (e MessageEncoders) Merge(o *MessageEncoders) MessageEncoders {
 	return e
 }
 
-func (e MessageEncoders) Encode(contractAddr sdk.AccAddress, msg wasmTypes.CosmosMsg) ([]sdk.Msg, error) {
+func (e MessageEncoders) Encode(contractAddr sdk.AccAddress, msg wasmvmtypes.CosmosMsg) ([]sdk.Msg, error) {
 	switch {
 	case msg.Bank != nil:
 		return e.Bank(contractAddr, msg.Bank)
@@ -79,7 +79,7 @@ func (e MessageEncoders) Encode(contractAddr sdk.AccAddress, msg wasmTypes.Cosmo
 	return nil, sdkerrors.Wrap(types.ErrInvalidMsg, "Unknown variant of Wasm")
 }
 
-func EncodeBankMsg(sender sdk.AccAddress, msg *wasmTypes.BankMsg) ([]sdk.Msg, error) {
+func EncodeBankMsg(sender sdk.AccAddress, msg *wasmvmtypes.BankMsg) ([]sdk.Msg, error) {
 	if msg.Send == nil {
 		return nil, sdkerrors.Wrap(types.ErrInvalidMsg, "Unknown variant of Bank")
 	}
@@ -102,7 +102,7 @@ func NoCustomMsg(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error) 
 	return nil, sdkerrors.Wrap(types.ErrInvalidMsg, "Custom variant not supported")
 }
 
-func EncodeStakingMsg(sender sdk.AccAddress, msg *wasmTypes.StakingMsg) ([]sdk.Msg, error) {
+func EncodeStakingMsg(sender sdk.AccAddress, msg *wasmvmtypes.StakingMsg) ([]sdk.Msg, error) {
 	switch {
 	case msg.Delegate != nil:
 		coin, err := convertWasmCoinToSdkCoin(msg.Delegate.Amount)
@@ -159,21 +159,17 @@ func EncodeStakingMsg(sender sdk.AccAddress, msg *wasmTypes.StakingMsg) ([]sdk.M
 	}
 }
 
-func EncodeWasmMsg(sender sdk.AccAddress, msg *wasmTypes.WasmMsg) ([]sdk.Msg, error) {
+func EncodeWasmMsg(sender sdk.AccAddress, msg *wasmvmtypes.WasmMsg) ([]sdk.Msg, error) {
 	switch {
 	case msg.Execute != nil:
-		contractAddr, err := sdk.AccAddressFromBech32(msg.Execute.ContractAddr)
-		if err != nil {
-			return nil, sdkerrors.Wrap(sdkerrors.ErrInvalidAddress, msg.Execute.ContractAddr)
-		}
 		coins, err := convertWasmCoinsToSdkCoins(msg.Execute.Send)
 		if err != nil {
 			return nil, err
 		}
 
 		sdkMsg := types.MsgExecuteContract{
-			Sender:    sender,
-			Contract:  contractAddr,
+			Sender:    sender.String(),
+			Contract:  msg.Execute.ContractAddr,
 			Msg:       msg.Execute.Msg,
 			SentFunds: coins,
 		}
@@ -185,7 +181,7 @@ func EncodeWasmMsg(sender sdk.AccAddress, msg *wasmTypes.WasmMsg) ([]sdk.Msg, er
 		}
 
 		sdkMsg := types.MsgInstantiateContract{
-			Sender: sender,
+			Sender: sender.String(),
 			CodeID: msg.Instantiate.CodeID,
 			// TODO: add this to CosmWasm
 			Label:     fmt.Sprintf("Auto-created by %s", sender),
@@ -198,7 +194,7 @@ func EncodeWasmMsg(sender sdk.AccAddress, msg *wasmTypes.WasmMsg) ([]sdk.Msg, er
 	}
 }
 
-func (h MessageHandler) Dispatch(ctx sdk.Context, contractAddr sdk.AccAddress, msg wasmTypes.CosmosMsg) error {
+func (h MessageHandler) Dispatch(ctx sdk.Context, contractAddr sdk.AccAddress, msg wasmvmtypes.CosmosMsg) error {
 	sdkMsgs, err := h.encoders.Encode(contractAddr, msg)
 	if err != nil {
 		return err
@@ -242,7 +238,7 @@ func (h MessageHandler) handleSdkMessage(ctx sdk.Context, contractAddr sdk.Addre
 	return nil
 }
 
-func convertWasmCoinsToSdkCoins(coins []wasmTypes.Coin) (sdk.Coins, error) {
+func convertWasmCoinsToSdkCoins(coins []wasmvmtypes.Coin) (sdk.Coins, error) {
 	var toSend sdk.Coins
 	for _, coin := range coins {
 		c, err := convertWasmCoinToSdkCoin(coin)
@@ -254,7 +250,7 @@ func convertWasmCoinsToSdkCoins(coins []wasmTypes.Coin) (sdk.Coins, error) {
 	return toSend, nil
 }
 
-func convertWasmCoinToSdkCoin(coin wasmTypes.Coin) (sdk.Coin, error) {
+func convertWasmCoinToSdkCoin(coin wasmvmtypes.Coin) (sdk.Coin, error) {
 	amount, ok := sdk.NewIntFromString(coin.Amount)
 	if !ok {
 		return sdk.Coin{}, sdkerrors.Wrap(sdkerrors.ErrInvalidCoins, coin.Amount+coin.Denom)

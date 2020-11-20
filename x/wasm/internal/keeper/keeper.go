@@ -5,9 +5,9 @@ import (
 	"encoding/binary"
 	"path/filepath"
 
-	wasm "github.com/CosmWasm/go-cosmwasm"
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
 	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
+	wasmvm "github.com/CosmWasm/wasmvm"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/store/prefix"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -45,10 +45,10 @@ type Keeper struct {
 	accountKeeper authkeeper.AccountKeeper
 	bankKeeper    bankkeeper.Keeper
 
-	wasmer       wasm.Wasmer
+	wasmer       types.WasmerEngine
 	queryPlugins QueryPlugins
 	messenger    MessageHandler
-	// queryGasLimit is the max wasm gas that can be spent on executing a query with a contract
+	// queryGasLimit is the max wasmvm gas that can be spent on executing a query with a contract
 	queryGasLimit uint64
 	authZPolicy   AuthorizationPolicy
 	paramSpace    paramtypes.Subspace
@@ -69,7 +69,7 @@ func NewKeeper(
 	customEncoders *MessageEncoders,
 	customPlugins *QueryPlugins,
 ) Keeper {
-	wasmer, err := wasm.NewWasmer(filepath.Join(homeDir, "wasm"), supportedFeatures)
+	wasmer, err := wasmvm.NewVM(filepath.Join(homeDir, "wasm"), supportedFeatures, wasmConfig.ContractDebugMode, wasmConfig.MemoryCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -82,7 +82,7 @@ func NewKeeper(
 	keeper := Keeper{
 		storeKey:      storeKey,
 		cdc:           cdc,
-		wasmer:        *wasmer,
+		wasmer:        wasmer,
 		accountKeeper: accountKeeper,
 		bankKeeper:    bankKeeper,
 		messenger:     NewMessageHandler(router, customEncoders),
@@ -106,6 +106,12 @@ func (k Keeper) getInstantiateAccessConfig(ctx sdk.Context) types.AccessType {
 	return a
 }
 
+func (k Keeper) GetMaxWasmCodeSize(ctx sdk.Context) uint64 {
+	var a uint64
+	k.paramSpace.Get(ctx, types.ParamStoreKeyMaxWasmCodeSize, &a)
+	return a
+}
+
 // GetParams returns the total set of wasm parameters.
 func (k Keeper) GetParams(ctx sdk.Context) types.Params {
 	var params types.Params
@@ -126,7 +132,7 @@ func (k Keeper) create(ctx sdk.Context, creator sdk.AccAddress, wasmCode []byte,
 	if !authZ.CanCreateCode(k.getUploadAccessConfig(ctx), creator) {
 		return 0, sdkerrors.Wrap(sdkerrors.ErrUnauthorized, "can not create code")
 	}
-	wasmCode, err = uncompress(wasmCode)
+	wasmCode, err = uncompress(wasmCode, k.GetMaxWasmCodeSize(ctx))
 	if err != nil {
 		return 0, sdkerrors.Wrap(types.ErrCreateFailed, err.Error())
 	}
@@ -151,7 +157,7 @@ func (k Keeper) create(ctx sdk.Context, creator sdk.AccAddress, wasmCode []byte,
 }
 
 func (k Keeper) importCode(ctx sdk.Context, codeID uint64, codeInfo types.CodeInfo, wasmCode []byte) error {
-	wasmCode, err := uncompress(wasmCode)
+	wasmCode, err := uncompress(wasmCode, k.GetMaxWasmCodeSize(ctx))
 	if err != nil {
 		return sdkerrors.Wrap(types.ErrCreateFailed, err.Error())
 	}
@@ -244,16 +250,18 @@ func (k Keeper) instantiate(ctx sdk.Context, codeID uint64, creator, admin sdk.A
 	events := types.ParseEvents(res.Attributes, contractAddress)
 	ctx.EventManager().EmitEvents(events)
 
+	// persist instance first
+	createdAt := types.NewAbsoluteTxPosition(ctx)
+	instance := types.NewContractInfo(codeID, creator, admin, label, createdAt)
+	store.Set(types.GetContractAddressKey(contractAddress), k.cdc.MustMarshalBinaryBare(&instance))
+	k.appendToContractHistory(ctx, contractAddress, instance.InitialHistory(initMsg))
+
+	// then dispatch so that contract could be called back
 	err = k.dispatchMessages(ctx, contractAddress, res.Messages)
 	if err != nil {
 		return nil, err
 	}
 
-	// persist instance
-	createdAt := types.NewAbsoluteTxPosition(ctx)
-	instance := types.NewContractInfo(codeID, creator, admin, label, createdAt)
-	store.Set(types.GetContractAddressKey(contractAddress), k.cdc.MustMarshalBinaryBare(&instance))
-	k.appendToContractHistory(ctx, contractAddress, instance.InitialHistory(initMsg))
 	return contractAddress, nil
 }
 
@@ -320,7 +328,7 @@ func (k Keeper) migrate(ctx sdk.Context, contractAddress sdk.AccAddress, caller 
 	if contractInfo == nil {
 		return nil, sdkerrors.Wrap(sdkerrors.ErrInvalidRequest, "unknown contract")
 	}
-	if !authZ.CanModifyContract(contractInfo.Admin, caller) {
+	if !authZ.CanModifyContract(contractInfo.AdminAddr(), caller) {
 		return nil, sdkerrors.Wrap(sdkerrors.ErrUnauthorized, "can not migrate")
 	}
 
@@ -380,10 +388,10 @@ func (k Keeper) setContractAdmin(ctx sdk.Context, contractAddress, caller, newAd
 	if contractInfo == nil {
 		return sdkerrors.Wrap(sdkerrors.ErrInvalidRequest, "unknown contract")
 	}
-	if !authZ.CanModifyContract(contractInfo.Admin, caller) {
+	if !authZ.CanModifyContract(contractInfo.AdminAddr(), caller) {
 		return sdkerrors.Wrap(sdkerrors.ErrUnauthorized, "can not modify contract")
 	}
-	contractInfo.Admin = newAdmin
+	contractInfo.Admin = newAdmin.String()
 	k.setContractInfo(ctx, contractAddress, contractInfo)
 	return nil
 }
@@ -554,7 +562,7 @@ func (k Keeper) GetByteCode(ctx sdk.Context, codeID uint64) ([]byte, error) {
 	return k.wasmer.GetCode(codeInfo.CodeHash)
 }
 
-func (k Keeper) dispatchMessages(ctx sdk.Context, contractAddr sdk.AccAddress, msgs []wasmTypes.CosmosMsg) error {
+func (k Keeper) dispatchMessages(ctx sdk.Context, contractAddr sdk.AccAddress, msgs []wasmvmtypes.CosmosMsg) error {
 	for _, msg := range msgs {
 		if err := k.messenger.Dispatch(ctx, contractAddr, msg); err != nil {
 			return err
@@ -667,7 +675,7 @@ type MultipiedGasMeter struct {
 	originalMeter sdk.GasMeter
 }
 
-var _ wasm.GasMeter = MultipiedGasMeter{}
+var _ wasmvm.GasMeter = MultipiedGasMeter{}
 
 func (m MultipiedGasMeter) GasConsumed() sdk.Gas {
 	return m.originalMeter.GasConsumed() * GasMultiplier

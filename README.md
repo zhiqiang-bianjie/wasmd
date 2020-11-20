@@ -1,10 +1,10 @@
 # Wasm Zone
 
-[![CircleCI](https://circleci.com/gh/cosmwasm/wasmd/tree/master.svg?style=shield)](https://circleci.com/gh/cosmwasm/wasmd/tree/master)
+[![CircleCI](https://circleci.com/gh/CosmWasm/wasmd/tree/master.svg?style=shield)](https://circleci.com/gh/CosmWasm/wasmd/tree/master)
 [![codecov](https://codecov.io/gh/cosmwasm/wasmd/branch/master/graph/badge.svg)](https://codecov.io/gh/cosmwasm/wasmd)
 [![Go Report Card](https://goreportcard.com/badge/github.com/CosmWasm/wasmd)](https://goreportcard.com/report/github.com/CosmWasm/wasmd)
-[![license](https://img.shields.io/github/license/cosmwasm/wasmd.svg)](https://github.com/CosmWasm/wasmd/blob/master/LICENSE)
-[![LoC](https://tokei.rs/b1/github/cosmwasm/wasmd)](https://github.com/CosmWasm/wasmd)
+[![license](https://img.shields.io/github/license/CosmWasm/wasmd.svg)](https://github.com/CosmWasm/wasmd/blob/master/LICENSE)
+[![LoC](https://tokei.rs/b1/github/CosmWasm/wasmd)](https://github.com/CosmWasm/wasmd)
 <!-- [![GolangCI](https://golangci.com/badges/github.com/CosmWasm/wasmd.svg)](https://golangci.com/r/github.com/CosmWasm/wasmd) -->
 
 This repository hosts `Wasmd`, the first implementation of a cosmos zone with wasm smart contracts enabled.
@@ -13,11 +13,11 @@ This code was forked from the `cosmos/gaia` repository as a basis and then we ad
 many gaia-specific files. However, the `wasmd` binary should function just like `gaiad` except for the
 addition of the `x/wasm` module.
 
-**Note**: Requires [Go 1.14+](https://golang.org/dl/)
+**Note**: Requires [Go 1.15+](https://golang.org/dl/)
 
 ## Supported Systems
 
-The supported systems are limited by the dlls created in [`go-cosmwasm`](https://github.com/CosmWasm/go-cosmwasm). In particular, **we only support MacOS and Linux**. 
+The supported systems are limited by the dlls created in [`wasmvm`](https://github.com/CosmWasm/wasmvm). In particular, **we only support MacOS and Linux**.
 For linux, the default is to build for glibc, and we cross-compile with CentOS 7 to provide
 backwards compatibility for `glibc 2.12+`. This includes all known supported distributions
 using glibc (CentOS 7 uses 2.12, obsolete Debian Jessy uses 2.19). 
@@ -68,24 +68,11 @@ To set up a single node testnet, [look at the deployment documentation](./docs/d
 If you want to deploy a whole cluster, [look at the network scripts](./networks/README.md).
 
 ## Protobuf
-
-1. Install [protoc](https://github.com/protocolbuffers/protobuf#protocol-compiler-installation) 
-
-2. Install [cosmos-extension](https://github.com/regen-network/cosmos-proto/) for [gogo-protobuf](https://github.com/gogo/protobuf)  
-```sh
-go install github.com/regen-network/cosmos-proto/protoc-gen-gocosmos
+Generate protobuf
+```shell script
+make proto-gen
 ```
-3. Install [grpc gateway extension](github.com/grpc-ecosystem/grpc-gateway)
-```go
-go install \                                                                     upgrade_stargate_rebased 3a8aa77 ✗
-    github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway \
-    github.com/grpc-ecosystem/grpc-gateway/protoc-gen-swagger \
-    github.com/golang/protobuf/protoc-gen-go
-```
-3. Run generator
-```sh
- make proto-gen
-```
+The generators are executed within a Docker [container](./contrib/prototools-docker), now.
 
 ## Dockerized
 
@@ -110,7 +97,7 @@ docker run --rm -it \
     --mount type=volume,source=wasmd_data,target=/root \
     cosmwasm/wasmd:latest ./setup_wasmd.sh cosmos1pkptre7fdkl6gfrzlesjjvhxhlc3r4gmmk8rs6
 
-# This will start both wasmd and wasmcli rest-server, only wasmcli output is shown on the screen
+# This will start both wasmd and rest-server, only rest-serve output is shown on the screen
 docker run --rm -it -p 26657:26657 -p 26656:26656 -p 1317:1317 \
     --mount type=volume,source=wasmd_data,target=/root \
     cosmwasm/wasmd:latest ./run_all.sh
@@ -139,7 +126,7 @@ sudo chown -R $(id -u):$(id -g) ./template
 # bind to non-/root and pass an argument to run.sh to copy the template into /root
 # we need wasmd_data volume mount not just for restart, but also to view logs
 docker volume rm -f wasmd_data
-docker run --rm -it -p 26657:26657 -p 26656:26656 -p 1317:1317 \
+docker run --rm -it -p 26657:26657 -p 26656:26656 -p 9090:9090 \
     --mount type=bind,source=$(pwd)/template,target=/template \
     --mount type=volume,source=wasmd_data,target=/root \
     cosmwasm/wasmd:latest ./run_all.sh /template
@@ -163,7 +150,7 @@ to the configuration.
 
 Available flags:
 
-* `-X github.com/CosmWasm/wasmd/app.CLIDir=.coral` - set the config directory for the cli (default `~/.wasmcli`) 
+ 
 * `-X github.com/CosmWasm/wasmd/app.NodeDir=.corald` - set the config/data directory for the node (default `~/.wasmd`)
 * `-X github.com/CosmWasm/wasmd/app.Bech32Prefix=coral` - set the bech32 prefix for all accounts (default `cosmos`)
 * `-X github.com/CosmWasm/wasmd/app.ProposalsEnabled=true` - enable all x/wasm governance proposals (default `false`)

@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -9,11 +10,12 @@ import (
 	"testing"
 	"time"
 
-	wasmTypes "github.com/CosmWasm/wasmd/x/wasm/internal/types"
-	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/internal/types"
+	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
+	"github.com/CosmWasm/wasmvm"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/codec"
-	"github.com/cosmos/cosmos-sdk/codec/types"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	params2 "github.com/cosmos/cosmos-sdk/simapp/params"
 	"github.com/cosmos/cosmos-sdk/std"
 	"github.com/cosmos/cosmos-sdk/store"
@@ -87,7 +89,7 @@ func MakeTestCodec() codec.Marshaler {
 }
 func MakeEncodingConfig() params2.EncodingConfig {
 	amino := codec.NewLegacyAmino()
-	interfaceRegistry := types.NewInterfaceRegistry()
+	interfaceRegistry := codectypes.NewInterfaceRegistry()
 	marshaler := codec.NewProtoCodec(interfaceRegistry)
 	txCfg := tx.NewTxConfig(marshaler, tx.DefaultSignModes)
 
@@ -115,10 +117,10 @@ var TestingStakeParams = stakingtypes.Params{
 type TestKeepers struct {
 	AccountKeeper authkeeper.AccountKeeper
 	StakingKeeper stakingkeeper.Keeper
-	WasmKeeper    Keeper
 	DistKeeper    distributionkeeper.Keeper
 	BankKeeper    bankkeeper.Keeper
 	GovKeeper     govkeeper.Keeper
+	WasmKeeper    *Keeper
 }
 
 // encoders can be nil to accept the defaults, or set it to override some of the message handlers (like default)
@@ -127,7 +129,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 	require.NoError(t, err)
 	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
-	keyWasm := sdk.NewKVStoreKey(wasmTypes.StoreKey)
+	keyWasm := sdk.NewKVStoreKey(types.StoreKey)
 	keyAcc := sdk.NewKVStoreKey(authtypes.StoreKey)
 	keyBank := sdk.NewKVStoreKey(banktypes.StoreKey)
 	keyStaking := sdk.NewKVStoreKey(stakingtypes.StoreKey)
@@ -152,8 +154,10 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 		Height: 1234567,
 		Time:   time.Date(2020, time.April, 22, 12, 0, 0, 0, time.UTC),
 	}, isCheckTx, log.NewNopLogger())
-	encodingConfig := MakeEncodingConfig
-	paramsKeeper := paramskeeper.NewKeeper(encodingConfig().Marshaler, encodingConfig().Amino, keyParams, tkeyParams)
+	encodingConfig := MakeEncodingConfig()
+	appCodec, legacyAmino := encodingConfig.Marshaler, encodingConfig.Amino
+
+	paramsKeeper := paramskeeper.NewKeeper(appCodec, legacyAmino, keyParams, tkeyParams)
 	paramsKeeper.Subspace(authtypes.ModuleName)
 	paramsKeeper.Subspace(banktypes.ModuleName)
 	paramsKeeper.Subspace(stakingtypes.ModuleName)
@@ -173,7 +177,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 	}
 	authSubsp, _ := paramsKeeper.GetSubspace(authtypes.ModuleName)
 	authKeeper := authkeeper.NewAccountKeeper(
-		encodingConfig().Marshaler,
+		appCodec,
 		keyAcc, // target store
 		authSubsp,
 		authtypes.ProtoBaseAccount, // prototype
@@ -187,7 +191,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 
 	bankSubsp, _ := paramsKeeper.GetSubspace(banktypes.ModuleName)
 	bankKeeper := bankkeeper.NewBaseKeeper(
-		encodingConfig().Marshaler,
+		appCodec,
 		keyBank,
 		authKeeper,
 		bankSubsp,
@@ -198,11 +202,11 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 	bankKeeper.SetParams(ctx, bankParams)
 
 	stakingSubsp, _ := paramsKeeper.GetSubspace(stakingtypes.ModuleName)
-	stakingKeeper := stakingkeeper.NewKeeper(encodingConfig().Marshaler, keyStaking, authKeeper, bankKeeper, stakingSubsp)
+	stakingKeeper := stakingkeeper.NewKeeper(appCodec, keyStaking, authKeeper, bankKeeper, stakingSubsp)
 	stakingKeeper.SetParams(ctx, TestingStakeParams)
 
 	distSubsp, _ := paramsKeeper.GetSubspace(distributiontypes.ModuleName)
-	distKeeper := distributionkeeper.NewKeeper(encodingConfig().Marshaler, keyDistro, distSubsp, authKeeper, bankKeeper, stakingKeeper, authtypes.FeeCollectorName, nil)
+	distKeeper := distributionkeeper.NewKeeper(appCodec, keyDistro, distSubsp, authKeeper, bankKeeper, stakingKeeper, authtypes.FeeCollectorName, nil)
 	distKeeper.SetParams(ctx, distributiontypes.DefaultParams())
 	stakingKeeper.SetHooks(distKeeper.Hooks())
 
@@ -227,12 +231,12 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 	router.AddRoute(sdk.NewRoute(distributiontypes.RouterKey, dh))
 
 	// Load default wasm config
-	wasmConfig := wasmTypes.DefaultWasmConfig()
+	wasmConfig := types.DefaultWasmConfig()
 
 	keeper := NewKeeper(
-		encodingConfig().Marshaler,
+		appCodec,
 		keyWasm,
-		paramsKeeper.Subspace(wasmtypes.DefaultParamspace),
+		paramsKeeper.Subspace(types.DefaultParamspace),
 		authKeeper,
 		bankKeeper,
 		router,
@@ -242,18 +246,18 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 		encoders,
 		queriers,
 	)
-	keeper.setParams(ctx, wasmtypes.DefaultParams())
+	keeper.setParams(ctx, types.DefaultParams())
 	// add wasm handler so we can loop-back (contracts calling contracts)
-	router.AddRoute(sdk.NewRoute(wasmTypes.RouterKey, TestHandler(keeper)))
+	router.AddRoute(sdk.NewRoute(types.RouterKey, TestHandler(&keeper)))
 
 	govRouter := govtypes.NewRouter().
 		AddRoute(govtypes.RouterKey, govtypes.ProposalHandler).
 		AddRoute(paramproposal.RouterKey, params.NewParamChangeProposalHandler(paramsKeeper)).
 		AddRoute(distributiontypes.RouterKey, distribution.NewCommunityPoolSpendProposalHandler(distKeeper)).
-		AddRoute(wasmtypes.RouterKey, NewWasmProposalHandler(keeper, wasmtypes.EnableAllProposals))
+		AddRoute(types.RouterKey, NewWasmProposalHandler(keeper, types.EnableAllProposals))
 
 	govKeeper := govkeeper.NewKeeper(
-		encodingConfig().Marshaler, keyGov, paramsKeeper.Subspace(govtypes.ModuleName).WithKeyTable(govtypes.ParamKeyTable()), authKeeper, bankKeeper, stakingKeeper, govRouter,
+		appCodec, keyGov, paramsKeeper.Subspace(govtypes.ModuleName).WithKeyTable(govtypes.ParamKeyTable()), authKeeper, bankKeeper, stakingKeeper, govRouter,
 	)
 
 	govKeeper.SetProposalID(ctx, govtypes.DefaultStartingProposalID)
@@ -265,7 +269,7 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 		AccountKeeper: authKeeper,
 		StakingKeeper: stakingKeeper,
 		DistKeeper:    distKeeper,
-		WasmKeeper:    keeper,
+		WasmKeeper:    &keeper,
 		BankKeeper:    bankKeeper,
 		GovKeeper:     govKeeper,
 	}
@@ -273,15 +277,15 @@ func CreateTestInput(t *testing.T, isCheckTx bool, supportedFeatures string, enc
 }
 
 // TestHandler returns a wasm handler for tests (to avoid circular imports)
-func TestHandler(k Keeper) sdk.Handler {
+func TestHandler(k *Keeper) sdk.Handler {
 	return func(ctx sdk.Context, msg sdk.Msg) (*sdk.Result, error) {
 		ctx = ctx.WithEventManager(sdk.NewEventManager())
 
 		switch msg := msg.(type) {
-		case *wasmtypes.MsgInstantiateContract:
+		case *types.MsgInstantiateContract:
 			return handleInstantiate(ctx, k, msg)
 
-		case *wasmtypes.MsgExecuteContract:
+		case *types.MsgExecuteContract:
 			return handleExecute(ctx, k, msg)
 
 		default:
@@ -291,8 +295,16 @@ func TestHandler(k Keeper) sdk.Handler {
 	}
 }
 
-func handleInstantiate(ctx sdk.Context, k Keeper, msg *wasmtypes.MsgInstantiateContract) (*sdk.Result, error) {
-	contractAddr, err := k.Instantiate(ctx, msg.CodeID, msg.Sender, msg.Admin, msg.InitMsg, msg.Label, msg.InitFunds)
+func handleInstantiate(ctx sdk.Context, k *Keeper, msg *types.MsgInstantiateContract) (*sdk.Result, error) {
+	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
+	if err != nil {
+		return nil, sdkerrors.Wrap(err, "sender")
+	}
+	adminAddr, err := sdk.AccAddressFromBech32(msg.Admin)
+	if err != nil {
+		return nil, sdkerrors.Wrap(err, "admin")
+	}
+	contractAddr, err := k.Instantiate(ctx, msg.CodeID, senderAddr, adminAddr, msg.InitMsg, msg.Label, msg.InitFunds)
 	if err != nil {
 		return nil, err
 	}
@@ -303,8 +315,16 @@ func handleInstantiate(ctx sdk.Context, k Keeper, msg *wasmtypes.MsgInstantiateC
 	}, nil
 }
 
-func handleExecute(ctx sdk.Context, k Keeper, msg *wasmtypes.MsgExecuteContract) (*sdk.Result, error) {
-	res, err := k.Execute(ctx, msg.Contract, msg.Sender, msg.Msg, msg.SentFunds)
+func handleExecute(ctx sdk.Context, k *Keeper, msg *types.MsgExecuteContract) (*sdk.Result, error) {
+	senderAddr, err := sdk.AccAddressFromBech32(msg.Sender)
+	if err != nil {
+		return nil, sdkerrors.Wrap(err, "sender")
+	}
+	contractAddr, err := sdk.AccAddressFromBech32(msg.Contract)
+	if err != nil {
+		return nil, sdkerrors.Wrap(err, "admin")
+	}
+	res, err := k.Execute(ctx, contractAddr, senderAddr, msg.Msg, msg.SentFunds)
 	if err != nil {
 		return nil, err
 	}
@@ -313,16 +333,34 @@ func handleExecute(ctx sdk.Context, k Keeper, msg *wasmtypes.MsgExecuteContract)
 	return res, nil
 }
 
-func AnyAccAddress(_ *testing.T) sdk.AccAddress {
+func RandomBech32AccountAddress(_ *testing.T) string {
 	_, _, addr := keyPubAddr()
-	return addr
+	return addr.String()
 }
 
 type HackatomExampleContract struct {
-	InitialAmount   sdk.Coins
+	InitialAmount sdk.Coins
+	Creator       crypto.PrivKey
+	CreatorAddr   sdk.AccAddress
+	CodeID        uint64
+}
+
+func StoreHackatomExampleContract(t *testing.T, ctx sdk.Context, keepers TestKeepers) HackatomExampleContract {
+	anyAmount := sdk.NewCoins(sdk.NewInt64Coin("denom", 1000))
+	creator, _, creatorAddr := keyPubAddr()
+	fundAccounts(t, ctx, keepers.AccountKeeper, keepers.BankKeeper, creatorAddr, anyAmount)
+
+	wasmCode, err := ioutil.ReadFile("./testdata/hackatom.wasm")
+	require.NoError(t, err)
+
+	codeID, err := keepers.WasmKeeper.Create(ctx, creatorAddr, wasmCode, "", "", nil)
+	require.NoError(t, err)
+	return HackatomExampleContract{anyAmount, creator, creatorAddr, codeID}
+}
+
+type HackatomExampleInstance struct {
+	HackatomExampleContract
 	Contract        sdk.AccAddress
-	Creator         crypto.PrivKey
-	CreatorAddr     sdk.AccAddress
 	Verifier        crypto.PrivKey
 	VerifierAddr    sdk.AccAddress
 	Beneficiary     crypto.PrivKey
@@ -330,44 +368,39 @@ type HackatomExampleContract struct {
 }
 
 // InstantiateHackatomExampleContract load and instantiate the "./testdata/hackatom.wasm" contract
-func InstantiateHackatomExampleContract(t *testing.T, ctx sdk.Context, keepers TestKeepers) HackatomExampleContract {
-	anyAmount := sdk.NewCoins(sdk.NewInt64Coin("denom", 1000))
-	creator, _, creatorAddr := keyPubAddr()
-	fundAccounts(t, ctx, keepers.AccountKeeper, keepers.BankKeeper, creatorAddr, anyAmount)
+func InstantiateHackatomExampleContract(t *testing.T, ctx sdk.Context, keepers TestKeepers) HackatomExampleInstance {
+	contract := StoreHackatomExampleContract(t, ctx, keepers)
+
 	verifier, _, verifierAddr := keyPubAddr()
-	fundAccounts(t, ctx, keepers.AccountKeeper, keepers.BankKeeper, verifierAddr, anyAmount)
-
-	wasmCode, err := ioutil.ReadFile("./testdata/hackatom.wasm")
-	require.NoError(t, err)
-
-	contractID, err := keepers.WasmKeeper.Create(ctx, creatorAddr, wasmCode, "", "", nil)
-	require.NoError(t, err)
+	fundAccounts(t, ctx, keepers.AccountKeeper, keepers.BankKeeper, verifierAddr, contract.InitialAmount)
 
 	beneficiary, _, beneficiaryAddr := keyPubAddr()
-	initMsg := HackatomExampleInitMsg{
+	initMsgBz := HackatomExampleInitMsg{
 		Verifier:    verifierAddr,
 		Beneficiary: beneficiaryAddr,
-	}
-	initMsgBz, err := json.Marshal(initMsg)
-	require.NoError(t, err)
+	}.GetBytes(t)
 	initialAmount := sdk.NewCoins(sdk.NewInt64Coin("denom", 100))
-	contractAddr, err := keepers.WasmKeeper.Instantiate(ctx, contractID, creatorAddr, nil, initMsgBz, "demo contract to query", initialAmount)
+	contractAddr, err := keepers.WasmKeeper.Instantiate(ctx, contract.CodeID, contract.CreatorAddr, nil, initMsgBz, "demo contract to query", initialAmount)
 	require.NoError(t, err)
-	return HackatomExampleContract{
-		InitialAmount:   initialAmount,
-		Contract:        contractAddr,
-		Creator:         creator,
-		CreatorAddr:     creatorAddr,
-		Verifier:        verifier,
-		VerifierAddr:    verifierAddr,
-		Beneficiary:     beneficiary,
-		BeneficiaryAddr: beneficiaryAddr,
+	return HackatomExampleInstance{
+		HackatomExampleContract: contract,
+		Contract:                contractAddr,
+		Verifier:                verifier,
+		VerifierAddr:            verifierAddr,
+		Beneficiary:             beneficiary,
+		BeneficiaryAddr:         beneficiaryAddr,
 	}
 }
 
 type HackatomExampleInitMsg struct {
 	Verifier    sdk.AccAddress `json:"verifier"`
 	Beneficiary sdk.AccAddress `json:"beneficiary"`
+}
+
+func (m HackatomExampleInitMsg) GetBytes(t *testing.T) []byte {
+	initMsgBz, err := json.Marshal(m)
+	require.NoError(t, err)
+	return initMsgBz
 }
 
 func createFakeFundedAccount(t *testing.T, ctx sdk.Context, am authkeeper.AccountKeeper, bank bankkeeper.Keeper, coins sdk.Coins) sdk.AccAddress {
@@ -395,4 +428,92 @@ func keyPubAddr() (crypto.PrivKey, crypto.PubKey, sdk.AccAddress) {
 	pub := key.PubKey()
 	addr := sdk.AccAddress(pub.Address())
 	return key, pub, addr
+}
+
+var _ types.WasmerEngine = &MockWasmer{}
+
+// MockWasmer implements types.WasmerEngine for testing purpose. One or multiple messages can be stubbed.
+// Without a stub function a panic is thrown.
+type MockWasmer struct {
+	CreateFn      func(code cosmwasm.WasmCode) (cosmwasm.CodeID, error)
+	InstantiateFn func(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, initMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.InitResponse, uint64, error)
+	ExecuteFn     func(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, executeMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.HandleResponse, uint64, error)
+	QueryFn       func(code cosmwasm.CodeID, env wasmvmtypes.Env, queryMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) ([]byte, uint64, error)
+	MigrateFn     func(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, migrateMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.MigrateResponse, uint64, error)
+	GetCodeFn     func(code cosmwasm.CodeID) (cosmwasm.WasmCode, error)
+	CleanupFn     func()
+}
+
+func (m *MockWasmer) Create(code cosmwasm.WasmCode) (cosmwasm.CodeID, error) {
+	if m.CreateFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.CreateFn(code)
+}
+
+func (m *MockWasmer) Instantiate(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, initMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.InitResponse, uint64, error) {
+	if m.InstantiateFn == nil {
+		panic("not supposed to be called!")
+	}
+
+	return m.InstantiateFn(code, env, info, initMsg, store, goapi, querier, gasMeter, gasLimit)
+}
+
+func (m *MockWasmer) Execute(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, executeMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.HandleResponse, uint64, error) {
+	if m.ExecuteFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.ExecuteFn(code, env, info, executeMsg, store, goapi, querier, gasMeter, gasLimit)
+}
+
+func (m *MockWasmer) Query(code cosmwasm.CodeID, env wasmvmtypes.Env, queryMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) ([]byte, uint64, error) {
+	if m.QueryFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.QueryFn(code, env, queryMsg, store, goapi, querier, gasMeter, gasLimit)
+}
+
+func (m *MockWasmer) Migrate(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, migrateMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.MigrateResponse, uint64, error) {
+	if m.MigrateFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.MigrateFn(code, env, info, migrateMsg, store, goapi, querier, gasMeter, gasLimit)
+}
+
+func (m *MockWasmer) GetCode(code cosmwasm.CodeID) (cosmwasm.WasmCode, error) {
+	if m.GetCodeFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.GetCodeFn(code)
+}
+
+func (m *MockWasmer) Cleanup() {
+	if m.CleanupFn == nil {
+		panic("not supposed to be called!")
+	}
+	m.CleanupFn()
+}
+
+var alwaysPanicMockWasmer = &MockWasmer{}
+
+// selfCallingInstMockWasmer prepares a Wasmer mock that calls itself on instantiation.
+func selfCallingInstMockWasmer(executeCalled *bool) *MockWasmer {
+	return &MockWasmer{
+
+		CreateFn: func(code cosmwasm.WasmCode) (cosmwasm.CodeID, error) {
+			anyCodeID := bytes.Repeat([]byte{0x1}, 32)
+			return anyCodeID, nil
+		},
+		InstantiateFn: func(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, initMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.InitResponse, uint64, error) {
+			return &wasmvmtypes.InitResponse{
+				Messages: []wasmvmtypes.CosmosMsg{
+					{Wasm: &wasmvmtypes.WasmMsg{Execute: &wasmvmtypes.ExecuteMsg{ContractAddr: env.Contract.Address, Msg: []byte(`{}`)}}},
+				},
+			}, 1, nil
+		},
+		ExecuteFn: func(code cosmwasm.CodeID, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, executeMsg []byte, store cosmwasm.KVStore, goapi cosmwasm.GoAPI, querier cosmwasm.Querier, gasMeter cosmwasm.GasMeter, gasLimit uint64) (*wasmvmtypes.HandleResponse, uint64, error) {
+			*executeCalled = true
+			return &wasmvmtypes.HandleResponse{}, 1, nil
+		},
+	}
 }

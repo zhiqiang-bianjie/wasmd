@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	wasmTypes "github.com/CosmWasm/go-cosmwasm/types"
 	"github.com/CosmWasm/wasmd/x/wasm/internal/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/stretchr/testify/assert"
@@ -26,7 +26,7 @@ func TestEncoding(t *testing.T) {
 
 	cases := map[string]struct {
 		sender sdk.AccAddress
-		input  wasmTypes.CosmosMsg
+		input  wasmvmtypes.CosmosMsg
 		// set if valid
 		output []sdk.Msg
 		// set if invalid
@@ -34,12 +34,12 @@ func TestEncoding(t *testing.T) {
 	}{
 		"simple send": {
 			sender: addr1,
-			input: wasmTypes.CosmosMsg{
-				Bank: &wasmTypes.BankMsg{
-					Send: &wasmTypes.SendMsg{
+			input: wasmvmtypes.CosmosMsg{
+				Bank: &wasmvmtypes.BankMsg{
+					Send: &wasmvmtypes.SendMsg{
 						FromAddress: addr1.String(),
 						ToAddress:   addr2.String(),
-						Amount: []wasmTypes.Coin{
+						Amount: []wasmvmtypes.Coin{
 							{
 								Denom:  "uatom",
 								Amount: "12345",
@@ -65,12 +65,12 @@ func TestEncoding(t *testing.T) {
 		},
 		"invalid send amount": {
 			sender: addr1,
-			input: wasmTypes.CosmosMsg{
-				Bank: &wasmTypes.BankMsg{
-					Send: &wasmTypes.SendMsg{
+			input: wasmvmtypes.CosmosMsg{
+				Bank: &wasmvmtypes.BankMsg{
+					Send: &wasmvmtypes.SendMsg{
 						FromAddress: addr1.String(),
 						ToAddress:   addr2.String(),
-						Amount: []wasmTypes.Coin{
+						Amount: []wasmvmtypes.Coin{
 							{
 								Denom:  "uatom",
 								Amount: "123.456",
@@ -83,12 +83,12 @@ func TestEncoding(t *testing.T) {
 		},
 		"invalid address": {
 			sender: addr1,
-			input: wasmTypes.CosmosMsg{
-				Bank: &wasmTypes.BankMsg{
-					Send: &wasmTypes.SendMsg{
+			input: wasmvmtypes.CosmosMsg{
+				Bank: &wasmvmtypes.BankMsg{
+					Send: &wasmvmtypes.SendMsg{
 						FromAddress: addr1.String(),
 						ToAddress:   invalidAddr,
-						Amount: []wasmTypes.Coin{
+						Amount: []wasmvmtypes.Coin{
 							{
 								Denom:  "uatom",
 								Amount: "7890",
@@ -110,21 +110,21 @@ func TestEncoding(t *testing.T) {
 		},
 		"wasm execute": {
 			sender: addr1,
-			input: wasmTypes.CosmosMsg{
-				Wasm: &wasmTypes.WasmMsg{
-					Execute: &wasmTypes.ExecuteMsg{
+			input: wasmvmtypes.CosmosMsg{
+				Wasm: &wasmvmtypes.WasmMsg{
+					Execute: &wasmvmtypes.ExecuteMsg{
 						ContractAddr: addr2.String(),
 						Msg:          jsonMsg,
-						Send: []wasmTypes.Coin{
-							wasmTypes.NewCoin(12, "eth"),
+						Send: []wasmvmtypes.Coin{
+							wasmvmtypes.NewCoin(12, "eth"),
 						},
 					},
 				},
 			},
 			output: []sdk.Msg{
 				&types.MsgExecuteContract{
-					Sender:    addr1,
-					Contract:  addr2,
+					Sender:    addr1.String(),
+					Contract:  addr2.String(),
 					Msg:       jsonMsg,
 					SentFunds: sdk.NewCoins(sdk.NewInt64Coin("eth", 12)),
 				},
@@ -132,20 +132,20 @@ func TestEncoding(t *testing.T) {
 		},
 		"wasm instantiate": {
 			sender: addr1,
-			input: wasmTypes.CosmosMsg{
-				Wasm: &wasmTypes.WasmMsg{
-					Instantiate: &wasmTypes.InstantiateMsg{
+			input: wasmvmtypes.CosmosMsg{
+				Wasm: &wasmvmtypes.WasmMsg{
+					Instantiate: &wasmvmtypes.InstantiateMsg{
 						CodeID: 7,
 						Msg:    jsonMsg,
-						Send: []wasmTypes.Coin{
-							wasmTypes.NewCoin(123, "eth"),
+						Send: []wasmvmtypes.Coin{
+							wasmvmtypes.NewCoin(123, "eth"),
 						},
 					},
 				},
 			},
 			output: []sdk.Msg{
 				&types.MsgInstantiateContract{
-					Sender: addr1,
+					Sender: addr1.String(),
 					CodeID: 7,
 					// TODO: fix this
 					Label:     fmt.Sprintf("Auto-created by %s", addr1),
